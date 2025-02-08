@@ -100,3 +100,59 @@ def _first_turn(conv: Conversation) -> Iterator[tuple[str, int | None]]:
         if m.role != "user":
             yield f"first turn is {m.role}, not user", i
         return
+
+
+@rule("tool-call-pairing", "error", "Every tool call gets exactly one result before the conversation moves on")
+def _tool_call_pairing(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+    # call id -> turn of the assistant message that made it; reset at every assistant turn
+    pending: dict[str, int] = {}
+    unnamed: list[int] = []  # calls without ids (ShareGPT-style), answered in order
+
+    def unanswered() -> Iterator[tuple[str, int | None]]:
+        for call_id, turn in pending.items():
+            yield f"tool call {call_id!r} never gets a result", turn
+        for turn in unnamed:
+            yield "tool call never gets a result", turn
+        pending.clear()
+        unnamed.clear()
+
+    for i, m in enumerate(conv.messages):
+        if m.role == "tool":
+            if m.tool_call_id is not None and m.tool_call_id in pending:
+                del pending[m.tool_call_id]
+            elif m.tool_call_id is None and (unnamed or pending):
+                if unnamed:
+                    unnamed.pop(0)
+                else:
+                    pending.pop(next(iter(pending)))
+            elif m.tool_call_id is not None:
+                yield f"tool result for {m.tool_call_id!r}, which is not an open call", i
+            else:
+                yield "tool result with no tool call before it", i
+            continue
+        yield from unanswered()
+        for call in m.tool_calls if m.role == "assistant" else ():
+            if call.id is None:
+                unnamed.append(i)
+            else:
+                pending[call.id] = i
+    yield from unanswered()
+
+
+@rule("duplicate-tool-call-id", "error", "Tool call ids are unique within a conversation")
+def _duplicate_ids(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+    seen: dict[str, int] = {}
+    for i, m in enumerate(conv.messages):
+        for call in m.tool_calls:
+            if call.id is None:
+                continue
+            if call.id in seen:
+                yield f"tool call id {call.id!r} already used in turn {seen[call.id]}", i
+            seen.setdefault(call.id, i)
+
+
+@rule("tool-calls-outside-assistant", "error", "Only assistant messages make tool calls")
+def _calls_outside_assistant(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+    for i, m in enumerate(conv.messages):
+        if m.tool_calls and m.role != "assistant":
+            yield f"{m.role} message has tool calls", i

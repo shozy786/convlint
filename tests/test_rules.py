@@ -55,3 +55,58 @@ def test_select_and_ignore():
 def test_every_rule_is_documented():
     for r in RULES.values():
         assert r.severity in {"error", "warning"} and r.summary
+
+
+def call(name="get_weather", args='{"city": "Lahore"}', id="c1"):
+    return ToolCall(name, args, id)
+
+
+def assistant_calls(*calls, content=None):
+    return Message("assistant", content, list(calls))
+
+
+def result(id="c1", content="31C"):
+    return Message("tool", content, [], id)
+
+
+def pairing(c):
+    return sorted(p.turn for p in lint(c, select=["tool-call-pairing"]))
+
+
+def test_answered_calls_are_fine():
+    c = conv(("user", "?"), assistant_calls(call(id="a"), call(id="b")), result("b"), result("a"), ("assistant", "Done"))
+    assert lint(c) == []
+
+
+def test_unanswered_call():
+    c = conv(("user", "?"), assistant_calls(call(id="a"), call(id="b")), result("a"), ("assistant", "Done"))
+    (problem,) = lint(c, select=["tool-call-pairing"])
+    assert problem.turn == 1 and "'b' never gets a result" in problem.message
+
+
+def test_result_for_unknown_or_closed_call():
+    c = conv(("user", "?"), assistant_calls(call(id="a")), result("a"), result("a"), ("assistant", "ok"))
+    assert pairing(c) == [3]
+    c = conv(("user", "?"), assistant_calls(call(id="a")), result("x"), ("assistant", "ok"))
+    assert pairing(c) == [1, 2]  # 'a' unanswered, 'x' not open
+
+
+def test_result_with_no_call():
+    assert pairing(conv(("user", "?"), result(None), ("assistant", "ok"))) == [1]
+
+
+def test_calls_without_ids_are_answered_in_order():
+    c = conv(("user", "?"), assistant_calls(call(id=None), call(id=None)), result(None), result(None), ("assistant", "ok"))
+    assert pairing(c) == []
+    c = conv(("user", "?"), assistant_calls(call(id=None), call(id=None)), result(None), ("assistant", "ok"))
+    assert pairing(c) == [1]
+
+
+def test_duplicate_ids():
+    c = conv(("user", "?"), assistant_calls(call(id="a")), result("a"), assistant_calls(call(id="a")), result("a"), ("assistant", "ok"))
+    assert ("duplicate-tool-call-id", 3) in found(c)
+
+
+def test_tool_calls_outside_assistant():
+    c = conv(Message("user", "?", [call()]), ("assistant", "ok"))
+    assert ("tool-calls-outside-assistant", 0) in found(c)
