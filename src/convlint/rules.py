@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
+from typing import Any
+
+from jsonschema import exceptions as schema_errors
+from jsonschema import validators
 
 from .model import ROLES, Conversation
 
@@ -156,3 +161,71 @@ def _calls_outside_assistant(conv: Conversation) -> Iterator[tuple[str, int | No
     for i, m in enumerate(conv.messages):
         if m.tool_calls and m.role != "assistant":
             yield f"{m.role} message has tool calls", i
+
+
+@rule("invalid-tool-arguments", "error", "Tool call arguments are a JSON object")
+def _invalid_arguments(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+    for i, m in enumerate(conv.messages):
+        for call in m.tool_calls:
+            parsed = _arguments(call.arguments)
+            if parsed is _UNPARSEABLE:
+                yield f"{call.name}: arguments are not valid JSON: {call.arguments[:60]!r}", i
+            elif not isinstance(parsed, dict):
+                yield f"{call.name}: arguments must be a JSON object, got {type(parsed).__name__}", i
+
+
+@rule("unknown-tool", "error", "Tool calls only use tools declared on the conversation")
+def _unknown_tool(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+    declared = {t.name for t in conv.tools}
+    for i, m in enumerate(conv.messages):
+        for call in m.tool_calls:
+            if not declared:
+                yield f"calls {call.name!r} but no tools are declared; the model learns to call tools it was never shown", i
+            elif call.name not in declared:
+                yield f"calls {call.name!r}, which is not among the declared tools {sorted(declared)}", i
+
+
+@rule("invalid-tool-schema", "error", "Declared tool parameters are a valid JSON Schema")
+def _invalid_schema(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+    for tool in conv.tools:
+        if tool.parameters is None:
+            continue
+        try:
+            validators.validator_for(tool.parameters).check_schema(tool.parameters)
+        except schema_errors.SchemaError as e:
+            yield f"tool {tool.name!r} has an invalid parameters schema: {e.message}", None
+
+
+@rule("arguments-schema-mismatch", "error", "Tool call arguments validate against the tool's schema")
+def _schema_mismatch(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+    checkers: dict[str, Any] = {}
+    for tool in conv.tools:
+        if tool.parameters is None:
+            continue
+        cls = validators.validator_for(tool.parameters)
+        try:
+            cls.check_schema(tool.parameters)
+        except schema_errors.SchemaError:
+            continue  # reported by invalid-tool-schema
+        checkers[tool.name] = cls(tool.parameters)
+    for i, m in enumerate(conv.messages):
+        for call in m.tool_calls:
+            checker = checkers.get(call.name)
+            parsed = _arguments(call.arguments)
+            if checker is None or not isinstance(parsed, dict):
+                continue
+            for error in sorted(checker.iter_errors(parsed), key=lambda e: list(e.path)):
+                where = "/".join(str(p) for p in error.path)
+                yield f"{call.name}: {where + ': ' if where else ''}{error.message}", i
+
+
+_UNPARSEABLE = object()
+
+
+def _arguments(text: str) -> Any:
+    if not text.strip():
+        return {}  # "no arguments" is commonly written as an empty string
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return _UNPARSEABLE

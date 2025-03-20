@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "Shehroz Ahmed", email = "shozy.khantastic@gmail.com" }]
-dependencies = []
+dependencies = ["jsonschema>=4.18"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

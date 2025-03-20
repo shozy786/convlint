@@ -1,4 +1,4 @@
-from convlint.model import Conversation, Message, ToolCall
+from convlint.model import Conversation, Message, Tool, ToolCall
 from convlint.rules import RULES, lint
 
 
@@ -75,7 +75,7 @@ def pairing(c):
 
 def test_answered_calls_are_fine():
     c = conv(("user", "?"), assistant_calls(call(id="a"), call(id="b")), result("b"), result("a"), ("assistant", "Done"))
-    assert lint(c) == []
+    assert pairing(c) == []
 
 
 def test_unanswered_call():
@@ -110,3 +110,56 @@ def test_duplicate_ids():
 def test_tool_calls_outside_assistant():
     c = conv(Message("user", "?", [call()]), ("assistant", "ok"))
     assert ("tool-calls-outside-assistant", 0) in found(c)
+
+
+WEATHER = Tool(
+    "get_weather",
+    "Current weather",
+    {
+        "type": "object",
+        "properties": {"city": {"type": "string"}, "unit": {"enum": ["c", "f"]}},
+        "required": ["city"],
+        "additionalProperties": False,
+    },
+)
+
+
+def with_call(args, name="get_weather", tools=(WEATHER,)):
+    return conv(("user", "?"), assistant_calls(call(name, args, "a")), result("a"), ("assistant", "ok"), tools=tools)
+
+
+def messages(c, rule_name):
+    return [p.message for p in lint(c, select=[rule_name])]
+
+
+def test_valid_call():
+    assert lint(with_call('{"city": "Lahore", "unit": "c"}')) == []
+
+
+def test_invalid_json_arguments():
+    assert messages(with_call('{"city": "Lahore"'), "invalid-tool-arguments") == [
+        "get_weather: arguments are not valid JSON: '{\"city\": \"Lahore\"'"
+    ]
+    assert "got list" in messages(with_call("[1, 2]"), "invalid-tool-arguments")[0]
+
+
+def test_unknown_tool():
+    assert "not among the declared tools ['get_weather']" in messages(with_call("{}", name="get_time"), "unknown-tool")[0]
+    assert "no tools are declared" in messages(with_call("{}", tools=()), "unknown-tool")[0]
+
+
+def test_schema_mismatch():
+    found_ = messages(with_call('{"unit": "k", "country": "PK"}'), "arguments-schema-mismatch")
+    assert "get_weather: 'city' is a required property" in found_
+    assert any(m.startswith("get_weather: unit: 'k' is not one of") for m in found_)
+    assert any("Additional properties are not allowed ('country'" in m for m in found_)
+
+
+def test_empty_arguments_count_as_an_empty_object():
+    no_args = Tool("get_time", None, {"type": "object", "properties": {}})
+    assert lint(with_call("", name="get_time", tools=(no_args,))) == []
+
+
+def test_invalid_schema():
+    broken = Tool("get_weather", None, {"type": "objekt"})
+    assert "invalid parameters schema" in messages(with_call("{}", tools=(broken,)), "invalid-tool-schema")[0]
