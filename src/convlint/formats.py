@@ -46,6 +46,49 @@ def read_openai(record: dict[str, Any]) -> Conversation:
     return Conversation(messages, tools, meta)
 
 
+def read_anthropic(record: dict[str, Any]) -> Conversation:
+    """Anthropic Messages API shape: top-level ``system``, content blocks, ``tool_use``/``tool_result``.
+
+    Tool results arrive inside user messages; they become separate ``tool`` messages here, in
+    order, followed by whatever text the user message also carried.
+    """
+    if not isinstance(record.get("messages"), list):
+        raise FormatError("expected a 'messages' list")
+    messages = []
+    if record.get("system"):
+        messages.append(Message("system", _text(record["system"])))
+    for i, m in enumerate(record["messages"]):
+        if not isinstance(m, dict) or m.get("role") not in {"user", "assistant"}:
+            raise FormatError(f"messages[{i}]: expected role 'user' or 'assistant'")
+        blocks = m.get("content")
+        if isinstance(blocks, str) or blocks is None:
+            messages.append(Message(m["role"], blocks))
+            continue
+        texts, calls = [], []
+        for k, block in enumerate(blocks):
+            kind = block.get("type") if isinstance(block, dict) else None
+            if kind == "text":
+                texts.append(block.get("text", ""))
+            elif kind == "tool_use":
+                if "name" not in block:
+                    raise FormatError(f"messages[{i}].content[{k}]: tool_use without a name")
+                calls.append(ToolCall(block["name"], json.dumps(block.get("input", {}), ensure_ascii=False), block.get("id")))
+            elif kind == "tool_result":
+                messages.append(Message("tool", block.get("content"), tool_call_id=block.get("tool_use_id")))
+        if m["role"] == "assistant":
+            messages.append(Message("assistant", "\n".join(texts) or None, calls))
+        elif texts or not any(b.get("type") == "tool_result" for b in blocks if isinstance(b, dict)):
+            messages.append(Message("user", "\n".join(texts)))
+
+    tools = []
+    for k, t in enumerate(record.get("tools") or []):
+        if not isinstance(t, dict) or "name" not in t:
+            raise FormatError(f"tools[{k}]: expected an object with a 'name'")
+        tools.append(Tool(t["name"], t.get("description"), t.get("input_schema")))
+    meta = {k: v for k, v in record.items() if k not in {"system", "messages", "tools"}}
+    return Conversation(messages, tools, meta)
+
+
 def _openai_call(call: Any, where: str) -> ToolCall:
     if not isinstance(call, dict) or not isinstance(call.get("function"), dict):
         raise FormatError(f"{where}: expected {{'id': ..., 'function': {{'name': ..., 'arguments': ...}}}}")

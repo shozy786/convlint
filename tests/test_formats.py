@@ -1,6 +1,6 @@
 import pytest
 
-from convlint.formats import FormatError, read_openai
+from convlint.formats import FormatError, read_anthropic, read_openai
 
 WEATHER_TOOL = {
     "type": "function",
@@ -73,3 +73,56 @@ def test_legacy_functions():
 def test_malformed(record, message):
     with pytest.raises(FormatError, match=message):
         read_openai(record)
+
+
+ANTHROPIC = {
+    "system": "You are a helpful assistant.",
+    "messages": [
+        {"role": "user", "content": "Weather in Lahore?"},
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "Let me check."},
+                {"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": {"city": "Lahore"}},
+            ],
+        },
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": '{"temp_c": 31}'}]},
+        {"role": "assistant", "content": [{"type": "text", "text": "It's 31°C in Lahore."}]},
+    ],
+    "tools": [{"name": "get_weather", "description": "Current weather", "input_schema": {"type": "object"}}],
+}
+
+
+def test_read_anthropic():
+    conv = read_anthropic(ANTHROPIC)
+    assert [m.role for m in conv.messages] == ["system", "user", "assistant", "tool", "assistant"]
+    assert conv.messages[2].content == "Let me check."
+    (call,) = conv.messages[2].tool_calls
+    assert (call.id, call.name, call.arguments) == ("toolu_1", "get_weather", '{"city": "Lahore"}')
+    assert conv.messages[3].tool_call_id == "toolu_1"
+    assert conv.messages[3].content == '{"temp_c": 31}'
+    assert conv.tool("get_weather").parameters == {"type": "object"}
+
+
+def test_anthropic_user_text_alongside_tool_results():
+    record = {
+        "messages": [
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "f", "input": {}}]},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "t1", "content": "done"},
+                    {"type": "text", "text": "thanks, now summarise"},
+                ],
+            },
+            {"role": "assistant", "content": "Summary."},
+        ]
+    }
+    roles = [(m.role, m.content) for m in read_anthropic(record).messages]
+    assert roles[2:] == [("tool", "done"), ("user", "thanks, now summarise"), ("assistant", "Summary.")]
+
+
+def test_anthropic_rejects_openai_roles():
+    with pytest.raises(FormatError, match="expected role 'user' or 'assistant'"):
+        read_anthropic({"messages": [{"role": "system", "content": "x"}]})
