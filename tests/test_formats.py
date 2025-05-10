@@ -1,6 +1,15 @@
 import pytest
 
-from convlint.formats import FormatError, detect, read_anthropic, read_openai, read_sharegpt
+from convlint.formats import (
+    FormatError,
+    detect,
+    read_anthropic,
+    read_openai,
+    read_sharegpt,
+    write_anthropic,
+    write_openai,
+    write_sharegpt,
+)
 
 WEATHER_TOOL = {
     "type": "function",
@@ -181,3 +190,44 @@ def test_detect(record, expected):
 def test_detect_unknown():
     with pytest.raises(FormatError, match="can't tell the format"):
         detect({"prompt": "hi", "completion": "hello"})
+
+
+def test_sharegpt_to_openai_assigns_ids_in_order():
+    record = write_openai(read_sharegpt(SHAREGPT))
+    calls = record["messages"][2]["tool_calls"]
+    assert [c["id"] for c in calls] == ["call_2_0", "call_2_1"]
+    assert [m.get("tool_call_id") for m in record["messages"][3:5]] == ["call_2_0", "call_2_1"]
+
+
+def test_openai_to_anthropic_merges_tool_results():
+    record = write_anthropic(read_openai(OPENAI))
+    assert record["system"] == "You are a helpful assistant."
+    roles = [m["role"] for m in record["messages"]]
+    assert roles == ["user", "assistant", "user", "assistant"]
+    assert record["messages"][1]["content"][0] == {
+        "type": "tool_use",
+        "id": "call_1",
+        "name": "get_weather",
+        "input": {"city": "Lahore"},
+    }
+    assert record["tools"][0]["input_schema"]["required"] == ["city"]
+    assert record["source"] == "batch-7"
+
+
+def test_anthropic_to_sharegpt():
+    record = write_sharegpt(read_anthropic(ANTHROPIC))
+    assert [t["from"] for t in record["conversations"]] == ["human", "gpt", "function_call", "observation", "gpt"]
+    assert record["conversations"][2]["value"] == '{"name": "get_weather", "arguments": {"city": "Lahore"}}'
+
+
+def test_unconvertible_arguments():
+    conv = read_openai(
+        {
+            "messages": [
+                {"role": "user", "content": "?"},
+                {"role": "assistant", "tool_calls": [{"id": "1", "function": {"name": "f", "arguments": "{oops"}}]},
+            ]
+        }
+    )
+    with pytest.raises(FormatError, match="arguments are not valid JSON"):
+        write_anthropic(conv)

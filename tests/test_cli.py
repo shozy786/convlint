@@ -64,3 +64,21 @@ def test_mixed_formats_in_one_file(tmp_path):
     assert result.exit_code == 0, result.stdout
     forced = invoke("check", path, "--format", "openai")
     assert ":3: error invalid-format expected a 'messages' list" in forced.stdout
+
+
+def test_convert(tmp_path):
+    import json
+
+    from .test_formats import SHAREGPT
+
+    source = tmp_path / "sharegpt.jsonl"
+    source.write_text(json.dumps(SHAREGPT) + "\n" + '{"conversations": "nope"}\n')
+    out = tmp_path / "anthropic.jsonl"
+    result = invoke("convert", source, "--to", "anthropic", "-o", out)
+    assert result.exit_code == 1
+    assert ":2: skipped, expected a 'conversations' list" in result.stderr
+    assert "converted 1 conversations to anthropic, skipped 1" in result.stderr
+    (record,) = [json.loads(line) for line in out.read_text().splitlines()]
+    assert record["system"] == "You are a helpful assistant."
+    assert [m["role"] for m in record["messages"]] == ["user", "assistant", "user", "assistant"]
+    assert invoke("check", out).exit_code == 0
