@@ -1,6 +1,6 @@
 import pytest
 
-from convlint.formats import FormatError, read_anthropic, read_openai
+from convlint.formats import FormatError, read_anthropic, read_openai, read_sharegpt
 
 WEATHER_TOOL = {
     "type": "function",
@@ -126,3 +126,38 @@ def test_anthropic_user_text_alongside_tool_results():
 def test_anthropic_rejects_openai_roles():
     with pytest.raises(FormatError, match="expected role 'user' or 'assistant'"):
         read_anthropic({"messages": [{"role": "system", "content": "x"}]})
+
+
+SHAREGPT = {
+    "system": "You are a helpful assistant.",
+    "conversations": [
+        {"from": "human", "value": "Weather in Lahore and Karachi?"},
+        {"from": "gpt", "value": "Checking both."},
+        {
+            "from": "function_call",
+            "value": '[{"name": "get_weather", "arguments": {"city": "Lahore"}}, '
+            '{"name": "get_weather", "arguments": {"city": "Karachi"}}]',
+        },
+        {"from": "observation", "value": '{"temp_c": 31}'},
+        {"from": "observation", "value": '{"temp_c": 34}'},
+        {"from": "gpt", "value": "Lahore 31°C, Karachi 34°C."},
+    ],
+    "tools": [{"name": "get_weather", "description": "Current weather", "parameters": {"type": "object"}}],
+}
+
+
+def test_read_sharegpt():
+    conv = read_sharegpt(SHAREGPT)
+    assert [m.role for m in conv.messages] == ["system", "user", "assistant", "tool", "tool", "assistant"]
+    thought = conv.messages[2]
+    assert thought.content == "Checking both."
+    assert [c.arguments for c in thought.tool_calls] == ['{"city": "Lahore"}', '{"city": "Karachi"}']
+    assert all(c.id is None for c in thought.tool_calls)
+    assert conv.tool("get_weather") is not None
+
+
+def test_sharegpt_errors():
+    with pytest.raises(FormatError, match="unknown 'from' 'bot'"):
+        read_sharegpt({"conversations": [{"from": "bot", "value": "hi"}]})
+    with pytest.raises(FormatError, match="function_call value is not JSON"):
+        read_sharegpt({"conversations": [{"from": "function_call", "value": "get_weather(Lahore)"}]})
