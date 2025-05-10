@@ -7,10 +7,18 @@ import click
 
 from . import __version__
 from .check import check_file
-from .formats import read_openai
+from .formats import READERS, read_auto
 from .rules import RULES
 
 _existing_file = click.Path(exists=True, dir_okay=False, path_type=Path)
+_format_option = click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["auto", *READERS]),
+    default="auto",
+    show_default=True,
+    help="Input format; auto-detected per line by default.",
+)
 
 
 def _rule_list(ctx: click.Context, param: click.Parameter, value: str | None) -> list[str] | None:
@@ -34,11 +42,15 @@ def main() -> None:
 @click.option("--select", callback=_rule_list, help="Only run these rules (comma separated).")
 @click.option("--ignore", callback=_rule_list, help="Skip these rules (comma separated).")
 @click.option("--strict", is_flag=True, help="Exit non-zero on warnings too.")
-def check(files: tuple[Path, ...], select: list[str] | None, ignore: list[str] | None, strict: bool) -> None:
+@_format_option
+def check(
+    files: tuple[Path, ...], select: list[str] | None, ignore: list[str] | None, strict: bool, fmt: str
+) -> None:
     """Lint JSONL datasets. Exits 1 if any errors are found."""
+    reader = read_auto if fmt == "auto" else READERS[fmt]
     severities: Counter[str] = Counter()
     for path in files:
-        for f in check_file(path, read_openai, select, ignore or ()):
+        for f in check_file(path, reader, select, ignore or ()):
             severities[f.problem.severity] += 1
             turn = f" [turn {f.problem.turn}]" if f.problem.turn is not None else ""
             click.echo(f"{f.path}:{f.line}: {f.problem.severity} {f.problem.rule}{turn} {f.problem.message}")

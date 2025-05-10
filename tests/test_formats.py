@@ -1,6 +1,6 @@
 import pytest
 
-from convlint.formats import FormatError, read_anthropic, read_openai, read_sharegpt
+from convlint.formats import FormatError, detect, read_anthropic, read_openai, read_sharegpt
 
 WEATHER_TOOL = {
     "type": "function",
@@ -161,3 +161,23 @@ def test_sharegpt_errors():
         read_sharegpt({"conversations": [{"from": "bot", "value": "hi"}]})
     with pytest.raises(FormatError, match="function_call value is not JSON"):
         read_sharegpt({"conversations": [{"from": "function_call", "value": "get_weather(Lahore)"}]})
+
+
+@pytest.mark.parametrize(
+    "record, expected",
+    [
+        (OPENAI, "openai"),
+        (ANTHROPIC, "anthropic"),
+        (SHAREGPT, "sharegpt"),
+        ({"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]}, "openai"),
+        ({"messages": [], "tools": [{"name": "f", "input_schema": {}}]}, "anthropic"),
+        ({"messages": [{"role": "user", "content": [{"type": "tool_result", "tool_use_id": "x"}]}]}, "anthropic"),
+    ],
+)
+def test_detect(record, expected):
+    assert detect(record) == expected
+
+
+def test_detect_unknown():
+    with pytest.raises(FormatError, match="can't tell the format"):
+        detect({"prompt": "hi", "completion": "hello"})

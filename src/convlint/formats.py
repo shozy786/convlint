@@ -163,3 +163,33 @@ def _text(content: Any) -> str | None:
         texts = [p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"]
         return "\n".join(texts)
     return str(content)
+
+
+def detect(record: dict[str, Any]) -> str:
+    """Which format a record is in. Text-only OpenAI and Anthropic records look identical, and
+    read identically, so the tie goes to OpenAI."""
+    if "conversations" in record:
+        return "sharegpt"
+    messages = record.get("messages")
+    if not isinstance(messages, list):
+        raise FormatError("can't tell the format: no 'messages' or 'conversations' list")
+    if "system" in record or any("input_schema" in t for t in record.get("tools") or [] if isinstance(t, dict)):
+        return "anthropic"
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        if m.get("tool_calls") or m.get("role") in {"system", "tool", "function"}:
+            return "openai"
+        content = m.get("content")
+        if isinstance(content, list) and any(
+            isinstance(b, dict) and b.get("type") in {"tool_use", "tool_result"} for b in content
+        ):
+            return "anthropic"
+    return "openai"
+
+
+READERS = {"openai": read_openai, "anthropic": read_anthropic, "sharegpt": read_sharegpt}
+
+
+def read_auto(record: dict[str, Any]) -> Conversation:
+    return READERS[detect(record)](record)

@@ -50,3 +50,17 @@ def test_unknown_rule_name():
 def test_rules_listing():
     result = invoke("rules")
     assert "tool-call-pairing" in result.stdout and "error" in result.stdout
+
+
+def test_mixed_formats_in_one_file(tmp_path):
+    import json
+
+    from .test_formats import ANTHROPIC, OPENAI, SHAREGPT
+
+    path = tmp_path / "mixed.jsonl"
+    path.write_text("\n".join(json.dumps(r) for r in (OPENAI, ANTHROPIC, SHAREGPT)) + "\n")
+    result = invoke("check", path)
+    # the fixtures declare tools whose schemas the calls satisfy; only formats differ
+    assert result.exit_code == 0, result.stdout
+    forced = invoke("check", path, "--format", "openai")
+    assert ":3: error invalid-format expected a 'messages' list" in forced.stdout
