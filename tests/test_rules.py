@@ -192,3 +192,33 @@ def test_pii_found(text, kind):
 )
 def test_pii_not_found(text):
     assert lint(conv(("user", text), ("assistant", "ok")), select=["pii"]) == []
+
+
+def test_phone_numbers_passing_luhn_are_still_phones():
+    # +1 415 555 0131 happens to be Luhn-valid; it's 11 digits, so it can't be a card
+    found_ = [p.message for p in lint(conv(("user", "ring +1 415 555 0131"), ("assistant", "ok")), select=["pii"])]
+    assert found_ == ["phone number +1 4…31"]
+
+
+@pytest.mark.parametrize(
+    "text, placeholder",
+    [
+        ("Dear {{customer_name}}, your order shipped.", "{{customer_name}}"),
+        ("It will arrive on [INSERT DATE].", "[INSERT DATE]"),
+        ("TODO: write the answer", "TODO"),
+        ("Lorem ipsum dolor sit amet", "Lorem ipsum"),
+    ],
+)
+def test_template_leftovers(text, placeholder):
+    (problem,) = lint(conv(("user", "?"), ("assistant", text)), select=["template-leftover"])
+    assert problem.message == f"unfilled placeholder {placeholder!r}" and problem.turn == 1
+
+
+def test_code_braces_are_not_placeholders():
+    text = "Use f'{name}' or {'a': 1} in Python, and a list like [1, 2]."
+    assert lint(conv(("user", "?"), ("assistant", text)), select=["template-leftover"]) == []
+
+
+def test_boilerplate_only_in_assistant_turns():
+    c = conv(("user", "As an AI language model, what do you think?"), ("assistant", "As an AI language model, I can't."))
+    assert [p.turn for p in lint(c, select=["assistant-boilerplate"])] == [1]

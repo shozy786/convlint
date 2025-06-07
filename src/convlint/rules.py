@@ -255,7 +255,7 @@ def _pii(conv: Conversation) -> Iterator[tuple[str, int | None]]:
             if _DECIMAL.fullmatch(match.group()):
                 continue
             digits = re.sub(r"\D", "", match.group())
-            if 10 <= len(digits) <= 15 and not _luhn(digits):
+            if 10 <= len(digits) <= 15 and not (len(digits) >= 13 and _luhn(digits)):  # cards are below
                 yield f"phone number {_mask(match.group())}", i
         for match in _CARD.finditer(text):
             digits = re.sub(r"\D", "", match.group())
@@ -276,3 +276,31 @@ def _luhn(digits: str) -> bool:
         n = int(d) * (2 if k % 2 else 1)
         total += n - 9 if n > 9 else n
     return total % 10 == 0
+
+
+_PLACEHOLDER = re.compile(
+    r"\{\{\s*\w+\s*\}\}"  # {{customer_name}}
+    r"|\[(?:INSERT|ADD|YOUR|PLACEHOLDER|TBD|FILL)[^\]]*\]"  # [INSERT DATE]
+    r"|<(?:PLACEHOLDER|INSERT|TODO)[^>]*>"
+    r"|\bTODO\b|\bTBD\b|\bFIXME\b|lorem ipsum",
+    re.IGNORECASE,
+)
+_BOILERPLATE = re.compile(
+    r"as an ai(?: language)? model|as a large language model|i (?:do not|don't) have (?:access to )?real[- ]time"
+    r"|my (?:knowledge|training) cut-?off|i cannot browse the internet",
+    re.IGNORECASE,
+)
+
+
+@rule("template-leftover", "error", "No unfilled placeholders like {{name}}, [INSERT DATE] or TODO")
+def _template_leftover(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+    for i, m in enumerate(conv.messages):
+        for match in _PLACEHOLDER.finditer(m.content or ""):
+            yield f"unfilled placeholder {match.group()!r}", i
+
+
+@rule("assistant-boilerplate", "warning", "Assistant turns don't use canned AI disclaimers")
+def _boilerplate(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+    for i, m in enumerate(conv.messages):
+        if m.role == "assistant" and (match := _BOILERPLATE.search(m.content or "")):
+            yield f"canned phrase {match.group()!r}; the model will learn to say it", i
