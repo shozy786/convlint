@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -229,3 +230,49 @@ def _arguments(text: str) -> Any:
         return json.loads(text)
     except json.JSONDecodeError:
         return _UNPARSEABLE
+
+
+_EMAIL = re.compile(r"\b[\w.+-]+@([\w-]+\.)+[a-z]{2,}\b", re.IGNORECASE)
+_PHONE = re.compile(r"(?<![\w+])\+?\d[\d ().-]{8,}\d\b")
+_CARD = re.compile(r"\b\d(?:[ -]?\d){12,18}\b")
+_DECIMAL = re.compile(r"\d+\.\d+")
+_SECRET = re.compile(
+    r"\b(?:sk-(?:proj-|ant-)?[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|xox[baprs]-[A-Za-z0-9-]{10,}"
+    r"|AIza[0-9A-Za-z_-]{35})\b"
+)
+# documentation domains and numbers are fine to keep in training data
+_SAFE_EMAIL_DOMAINS = re.compile(r"@(?:[\w-]+\.)*(?:example\.(?:com|org|net)|test|invalid|localhost)$", re.IGNORECASE)
+
+
+@rule("pii", "warning", "No email addresses, phone numbers, card numbers or API keys in the text")
+def _pii(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+    for i, m in enumerate(conv.messages):
+        text = m.content or ""
+        for match in _EMAIL.finditer(text):
+            if not _SAFE_EMAIL_DOMAINS.search(match.group()):
+                yield f"email address {_mask(match.group())}", i
+        for match in _PHONE.finditer(text):
+            if _DECIMAL.fullmatch(match.group()):
+                continue
+            digits = re.sub(r"\D", "", match.group())
+            if 10 <= len(digits) <= 15 and not _luhn(digits):
+                yield f"phone number {_mask(match.group())}", i
+        for match in _CARD.finditer(text):
+            digits = re.sub(r"\D", "", match.group())
+            if 13 <= len(digits) <= 19 and _luhn(digits):
+                yield f"card number {_mask(match.group())}", i
+        for match in _SECRET.finditer(text):
+            yield f"API key or token {_mask(match.group())}", i
+
+
+def _mask(value: str) -> str:
+    # enough to find it in the file, not enough to leak it into CI logs
+    return f"{value[:4]}…{value[-2:]}" if len(value) > 8 else "…"
+
+
+def _luhn(digits: str) -> bool:
+    total = 0
+    for k, d in enumerate(reversed(digits)):
+        n = int(d) * (2 if k % 2 else 1)
+        total += n - 9 if n > 9 else n
+    return total % 10 == 0

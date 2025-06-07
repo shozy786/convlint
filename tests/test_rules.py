@@ -1,3 +1,5 @@
+import pytest
+
 from convlint.model import Conversation, Message, Tool, ToolCall
 from convlint.rules import RULES, lint
 
@@ -163,3 +165,30 @@ def test_empty_arguments_count_as_an_empty_object():
 def test_invalid_schema():
     broken = Tool("get_weather", None, {"type": "objekt"})
     assert "invalid parameters schema" in messages(with_call("{}", tools=(broken,)), "invalid-tool-schema")[0]
+
+
+@pytest.mark.parametrize(
+    "text, kind",
+    [
+        ("Write to ayesha.khan@meridian.pk for details", "email address ayes…pk"),
+        ("Call +92 300 1234567 after 5pm", "phone number +92 …67"),
+        ("card 4111 1111 1111 1111 exp 12/27", "card number 4111…11"),
+        ("use sk-proj-abcdefghijklmnopqrstuvwxyz012345 in the header", "API key or token sk-p…45"),
+        ("AKIAIOSFODNN7EXAMPLE", "API key or token AKIA…LE"),
+    ],
+)
+def test_pii_found(text, kind):
+    assert [p.message for p in lint(conv(("user", text), ("assistant", "ok")), select=["pii"])] == [kind]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Contact jane@example.com",
+        "Order 12345 shipped",
+        "The year 2025 had 365 days",
+        "Pi is 3.14159265358979",
+    ],
+)
+def test_pii_not_found(text):
+    assert lint(conv(("user", text), ("assistant", "ok")), select=["pii"]) == []
