@@ -75,7 +75,8 @@ def read_anthropic(record: dict[str, Any]) -> Conversation:
                     raise FormatError(f"messages[{i}].content[{k}]: tool_use without a name")
                 calls.append(ToolCall(block["name"], json.dumps(block.get("input", {}), ensure_ascii=False), block.get("id")))
             elif kind == "tool_result":
-                messages.append(Message("tool", block.get("content"), tool_call_id=block.get("tool_use_id")))
+                # content is a string or, as often, a list of text/image blocks
+                messages.append(Message("tool", _text(block.get("content")), tool_call_id=block.get("tool_use_id")))
         if m["role"] == "assistant":
             messages.append(Message("assistant", "\n".join(texts) or None, calls))
         elif texts or not any(b.get("type") == "tool_result" for b in blocks if isinstance(b, dict)):
