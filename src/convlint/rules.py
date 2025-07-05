@@ -12,6 +12,7 @@ from jsonschema import exceptions as schema_errors
 from jsonschema import validators
 
 from .model import ROLES, Conversation
+from .tokens import conversation_tokens
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,51 +24,63 @@ class Problem:
 
 
 @dataclass(frozen=True)
+class Options:
+    max_tokens: int = 16_384
+    encoding: str = "o200k_base"
+
+
+@dataclass(frozen=True)
 class Rule:
     name: str
     severity: str
     summary: str
-    check: Callable[[Conversation], Iterable[tuple[str, int | None]]]  # (message, turn)
+    check: Callable[[Conversation, Options], Iterable[tuple[str, int | None]]]  # (message, turn)
 
 
 RULES: dict[str, Rule] = {}
 
 
 def rule(name: str, severity: str, summary: str):
-    def register(fn: Callable[[Conversation], Iterable[tuple[str, int | None]]]):
+    def register(fn: Callable[[Conversation, Options], Iterable[tuple[str, int | None]]]):
         RULES[name] = Rule(name, severity, summary, fn)
         return fn
 
     return register
 
 
-def lint(conversation: Conversation, select: Iterable[str] | None = None, ignore: Iterable[str] = ()) -> list[Problem]:
+def lint(
+    conversation: Conversation,
+    select: Iterable[str] | None = None,
+    ignore: Iterable[str] = (),
+    options: Options | None = None,
+) -> list[Problem]:
     names = set(select) if select is not None else set(RULES)
     names -= set(ignore)
+    opts = options or Options()
     return [
         Problem(r.name, r.severity, message, turn)
         for r in RULES.values()
         if r.name in names
-        for message, turn in r.check(conversation)
+        for message, turn in r.check(conversation, opts)
     ]
 
 
 @rule("unknown-role", "error", "Every message has a role of system, user, assistant or tool")
-def _unknown_role(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+def _unknown_role(conv: Conversation, opts: Options) -> Iterator[tuple[str, int | None]]:
     for i, m in enumerate(conv.messages):
         if m.role not in ROLES:
             yield f"unknown role {m.role!r}", i
 
 
 @rule("system-not-first", "error", "A system message can only be the first message")
-def _system_not_first(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+def _system_not_first(conv: Conversation, opts: Options) -> Iterator[tuple[str, int | None]]:
     for i, m in enumerate(conv.messages[1:], 1):
         if m.role == "system":
             yield "system message after the first turn; most chat templates drop or reject it", i
 
 
 @rule("empty-message", "error", "Messages have content (assistant messages may have only tool calls)")
-def _empty_message(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+def _empty_message(conv: Conversation, opts: Options) -> Iterator[tuple[str, int | None]]:
     for i, m in enumerate(conv.messages):
         empty = not (m.content or "").strip()
         if empty and not (m.role == "assistant" and m.tool_calls):
@@ -75,7 +88,7 @@ def _empty_message(conv: Conversation) -> Iterator[tuple[str, int | None]]:
 
 
 @rule("consecutive-turns", "warning", "User and assistant turns alternate")
-def _consecutive(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+def _consecutive(conv: Conversation, opts: Options) -> Iterator[tuple[str, int | None]]:
     for i in range(1, len(conv.messages)):
         prev, cur = conv.messages[i - 1], conv.messages[i]
         # an assistant tool call followed by more assistant text is legitimate only via tool results
@@ -84,13 +97,13 @@ def _consecutive(conv: Conversation) -> Iterator[tuple[str, int | None]]:
 
 
 @rule("no-assistant-turn", "error", "There is at least one assistant message to train on")
-def _no_assistant(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+def _no_assistant(conv: Conversation, opts: Options) -> Iterator[tuple[str, int | None]]:
     if not any(m.role == "assistant" for m in conv.messages):
         yield "no assistant message; nothing for the model to learn from", None
 
 
 @rule("bad-last-turn", "error", "The conversation ends with an assistant message")
-def _bad_last_turn(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+def _bad_last_turn(conv: Conversation, opts: Options) -> Iterator[tuple[str, int | None]]:
     if conv.messages and conv.messages[-1].role != "assistant":
         last = len(conv.messages) - 1
         yield f"ends with a {conv.messages[-1].role} message, which is never trained on", last
@@ -99,7 +112,7 @@ def _bad_last_turn(conv: Conversation) -> Iterator[tuple[str, int | None]]:
 
 
 @rule("first-turn-not-user", "warning", "The first non-system message comes from the user")
-def _first_turn(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+def _first_turn(conv: Conversation, opts: Options) -> Iterator[tuple[str, int | None]]:
     for i, m in enumerate(conv.messages):
         if m.role == "system":
             continue
@@ -109,7 +122,7 @@ def _first_turn(conv: Conversation) -> Iterator[tuple[str, int | None]]:
 
 
 @rule("tool-call-pairing", "error", "Every tool call gets exactly one result before the conversation moves on")
-def _tool_call_pairing(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+def _tool_call_pairing(conv: Conversation, opts: Options) -> Iterator[tuple[str, int | None]]:
     # call id -> turn of the assistant message that made it; reset at every assistant turn
     pending: dict[str, int] = {}
     unnamed: list[int] = []  # calls without ids (ShareGPT-style), answered in order
@@ -146,7 +159,7 @@ def _tool_call_pairing(conv: Conversation) -> Iterator[tuple[str, int | None]]:
 
 
 @rule("duplicate-tool-call-id", "error", "Tool call ids are unique within a conversation")
-def _duplicate_ids(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+def _duplicate_ids(conv: Conversation, opts: Options) -> Iterator[tuple[str, int | None]]:
     seen: dict[str, int] = {}
     for i, m in enumerate(conv.messages):
         for call in m.tool_calls:
@@ -158,14 +171,14 @@ def _duplicate_ids(conv: Conversation) -> Iterator[tuple[str, int | None]]:
 
 
 @rule("tool-calls-outside-assistant", "error", "Only assistant messages make tool calls")
-def _calls_outside_assistant(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+def _calls_outside_assistant(conv: Conversation, opts: Options) -> Iterator[tuple[str, int | None]]:
     for i, m in enumerate(conv.messages):
         if m.tool_calls and m.role != "assistant":
             yield f"{m.role} message has tool calls", i
 
 
 @rule("invalid-tool-arguments", "error", "Tool call arguments are a JSON object")
-def _invalid_arguments(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+def _invalid_arguments(conv: Conversation, opts: Options) -> Iterator[tuple[str, int | None]]:
     for i, m in enumerate(conv.messages):
         for call in m.tool_calls:
             parsed = _arguments(call.arguments)
@@ -176,7 +189,7 @@ def _invalid_arguments(conv: Conversation) -> Iterator[tuple[str, int | None]]:
 
 
 @rule("unknown-tool", "error", "Tool calls only use tools declared on the conversation")
-def _unknown_tool(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+def _unknown_tool(conv: Conversation, opts: Options) -> Iterator[tuple[str, int | None]]:
     declared = {t.name for t in conv.tools}
     for i, m in enumerate(conv.messages):
         for call in m.tool_calls:
@@ -187,7 +200,7 @@ def _unknown_tool(conv: Conversation) -> Iterator[tuple[str, int | None]]:
 
 
 @rule("invalid-tool-schema", "error", "Declared tool parameters are a valid JSON Schema")
-def _invalid_schema(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+def _invalid_schema(conv: Conversation, opts: Options) -> Iterator[tuple[str, int | None]]:
     for tool in conv.tools:
         if tool.parameters is None:
             continue
@@ -198,7 +211,7 @@ def _invalid_schema(conv: Conversation) -> Iterator[tuple[str, int | None]]:
 
 
 @rule("arguments-schema-mismatch", "error", "Tool call arguments validate against the tool's schema")
-def _schema_mismatch(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+def _schema_mismatch(conv: Conversation, opts: Options) -> Iterator[tuple[str, int | None]]:
     checkers: dict[str, Any] = {}
     for tool in conv.tools:
         if tool.parameters is None:
@@ -245,7 +258,7 @@ _SAFE_EMAIL_DOMAINS = re.compile(r"@(?:[\w-]+\.)*(?:example\.(?:com|org|net)|tes
 
 
 @rule("pii", "warning", "No email addresses, phone numbers, card numbers or API keys in the text")
-def _pii(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+def _pii(conv: Conversation, opts: Options) -> Iterator[tuple[str, int | None]]:
     for i, m in enumerate(conv.messages):
         text = m.content or ""
         for match in _EMAIL.finditer(text):
@@ -293,14 +306,21 @@ _BOILERPLATE = re.compile(
 
 
 @rule("template-leftover", "error", "No unfilled placeholders like {{name}}, [INSERT DATE] or TODO")
-def _template_leftover(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+def _template_leftover(conv: Conversation, opts: Options) -> Iterator[tuple[str, int | None]]:
     for i, m in enumerate(conv.messages):
         for match in _PLACEHOLDER.finditer(m.content or ""):
             yield f"unfilled placeholder {match.group()!r}", i
 
 
 @rule("assistant-boilerplate", "warning", "Assistant turns don't use canned AI disclaimers")
-def _boilerplate(conv: Conversation) -> Iterator[tuple[str, int | None]]:
+def _boilerplate(conv: Conversation, opts: Options) -> Iterator[tuple[str, int | None]]:
     for i, m in enumerate(conv.messages):
         if m.role == "assistant" and (match := _BOILERPLATE.search(m.content or "")):
             yield f"canned phrase {match.group()!r}; the model will learn to say it", i
+
+
+@rule("too-long", "warning", "The conversation fits in the training context window (max_tokens)")
+def _too_long(conv: Conversation, opts: Options) -> Iterator[tuple[str, int | None]]:
+    tokens = conversation_tokens(conv, opts.encoding)
+    if tokens > opts.max_tokens:
+        yield f"~{tokens:,} tokens, over max_tokens={opts.max_tokens:,}; trainers truncate or drop it", None

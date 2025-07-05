@@ -13,7 +13,8 @@ authors = [{ name = "Shehroz Ahmed", email = "shozy.khantastic@gmail.com" }]
 dependencies = ["jsonschema>=4.18", "click>=8.1"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+tokens = ["tiktoken>=0.7"]
+dev = ["pytest>=8", "tiktoken>=0.7"]
 
 [project.scripts]
 convlint = "convlint.cli:main"

@@ -1,7 +1,7 @@
 import pytest
 
 from convlint.model import Conversation, Message, Tool, ToolCall
-from convlint.rules import RULES, lint
+from convlint.rules import RULES, Options, lint
 
 
 def conv(*messages, tools=()):
@@ -222,3 +222,11 @@ def test_code_braces_are_not_placeholders():
 def test_boilerplate_only_in_assistant_turns():
     c = conv(("user", "As an AI language model, what do you think?"), ("assistant", "As an AI language model, I can't."))
     assert [p.turn for p in lint(c, select=["assistant-boilerplate"])] == [1]
+
+
+def test_too_long():
+    long_answer = "word " * 3000
+    c = conv(("user", "Tell me a story"), ("assistant", long_answer))
+    (problem,) = lint(c, select=["too-long"], options=Options(max_tokens=2000))
+    assert problem.message.startswith("~3,0") and "over max_tokens=2,000" in problem.message
+    assert lint(c, select=["too-long"], options=Options(max_tokens=4000)) == []
