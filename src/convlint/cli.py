@@ -7,7 +7,8 @@ from pathlib import Path
 import click
 
 from . import __version__
-from .check import check_file
+from .check import check_files
+from .dataset import DATASET_RULES
 from .formats import READERS, WRITERS, FormatError, read_auto
 from .io import read_jsonl
 from .rules import RULES
@@ -27,7 +28,7 @@ def _rule_list(ctx: click.Context, param: click.Parameter, value: str | None) ->
     if value is None:
         return None
     names = [n.strip() for n in value.split(",") if n.strip()]
-    unknown = [n for n in names if n not in RULES]
+    unknown = [n for n in names if n not in RULES and n not in DATASET_RULES]
     if unknown:
         raise click.BadParameter(f"unknown rules {unknown}; see `convlint rules`")
     return names
@@ -51,11 +52,10 @@ def check(
     """Lint JSONL datasets. Exits 1 if any errors are found."""
     reader = read_auto if fmt == "auto" else READERS[fmt]
     severities: Counter[str] = Counter()
-    for path in files:
-        for f in check_file(path, reader, select, ignore or ()):
-            severities[f.problem.severity] += 1
-            turn = f" [turn {f.problem.turn}]" if f.problem.turn is not None else ""
-            click.echo(f"{f.path}:{f.line}: {f.problem.severity} {f.problem.rule}{turn} {f.problem.message}")
+    for f in check_files(files, reader, select, ignore or ()):
+        severities[f.problem.severity] += 1
+        turn = f" [turn {f.problem.turn}]" if f.problem.turn is not None else ""
+        click.echo(f"{f.path}:{f.line}: {f.problem.severity} {f.problem.rule}{turn} {f.problem.message}")
     errors, warnings = severities["error"], severities["warning"]
     click.echo(f"{errors} error{'s' * (errors != 1)}, {warnings} warning{'s' * (warnings != 1)}", err=True)
     if errors or (strict and warnings):
@@ -93,6 +93,7 @@ def convert(source: Path, target: str, output, fmt: str) -> None:
 @main.command("rules")
 def list_rules() -> None:
     """List every rule with its default severity."""
-    width = max(map(len, RULES))
-    for r in RULES.values():
+    every = [*RULES.values(), *DATASET_RULES.values()]
+    width = max(len(r.name) for r in every)
+    for r in every:
         click.echo(f"{r.name:<{width}}  {r.severity:<7}  {r.summary}")
