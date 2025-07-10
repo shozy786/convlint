@@ -34,7 +34,9 @@ def check_files(
     wanted = set(select) if select is not None else None
     ignore = set(ignore)
     dataset_checks = [
-        r.factory() for r in DATASET_RULES.values() if (wanted is None or r.name in wanted) and r.name not in ignore
+        r.factory(options or Options())
+        for r in DATASET_RULES.values()
+        if (wanted is None or r.name in wanted) and r.name not in ignore
     ]
     for path in paths:
         for line in read_jsonl(path):

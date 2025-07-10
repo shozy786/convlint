@@ -27,6 +27,7 @@ class Problem:
 class Options:
     max_tokens: int = 16_384
     encoding: str = "o200k_base"
+    near_duplicate_threshold: float = 0.85
 
 
 @dataclass(frozen=True)

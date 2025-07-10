@@ -26,3 +26,30 @@ def test_exact_duplicates_across_files_and_formats(tmp_path):
 def test_duplicate_rule_can_be_ignored(tmp_path):
     a = write(tmp_path / "a.jsonl", OPENAI, OPENAI)
     assert [f.problem.rule for f in check_files([a], read_auto, ignore=["duplicate"])] == []
+
+
+def chat(question, answer):
+    return {"messages": [{"role": "user", "content": question}, {"role": "assistant", "content": answer}]}
+
+
+TEMPLATE = (
+    "Our {city} branch is open from nine to five on weekdays and from ten to two on Saturdays. "
+    "It is closed on Sundays and public holidays. You can book an appointment online up to two weeks "
+    "ahead, and walk-in customers are served in the order they arrive. Bring a photo ID and your "
+    "account number, and allow about twenty minutes for most requests."
+)
+
+
+def test_near_duplicates(tmp_path):
+    question = "When is the {city} branch open?"
+    path = write(
+        tmp_path / "chats.jsonl",
+        chat(question.format(city="Lahore"), TEMPLATE.format(city="Lahore")),
+        chat(question.format(city="Multan"), TEMPLATE.format(city="Multan")),  # a templated generation
+        chat("How do I reset my password?", "Open settings, choose security and press reset."),
+        chat(question.format(city="Lahore"), TEMPLATE.format(city="Lahore")),  # exact: the other rule's job
+    )
+    found = [(f.line, f.problem.rule, f.problem.message) for f in check_files([path], read_auto)]
+    near = [(line, msg) for line, rule, msg in found if rule == "near-duplicate"]
+    assert len(near) == 1 and near[0][0] == 2 and near[0][1].endswith(f"similar to {path}:1")
+    assert (4, "duplicate", f"same conversation as {path}:1") in found
