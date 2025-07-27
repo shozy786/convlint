@@ -7,6 +7,7 @@ from pathlib import Path
 import click
 
 from . import __version__
+from . import config
 from .check import check_files
 from .dataset import DATASET_RULES, ExactDuplicates, NearDuplicates
 from .formats import READERS, WRITERS, FormatError, read_auto
@@ -18,10 +19,20 @@ _format_option = click.option(
     "--format",
     "fmt",
     type=click.Choice(["auto", *READERS]),
-    default="auto",
-    show_default=True,
-    help="Input format; auto-detected per line by default.",
+    help="Input format; auto-detected per line unless configured.",
 )
+
+
+def _settings(path: Path | None) -> config.Settings:
+    try:
+        return config.load(path or config.find())
+    except config.ConfigError as e:
+        raise click.ClickException(str(e)) from None
+
+
+def _reader(fmt: str | None, settings: config.Settings):
+    fmt = fmt or settings.format
+    return read_auto if fmt == "auto" else READERS[fmt]
 
 
 def _rule_list(ctx: click.Context, param: click.Parameter, value: str | None) -> list[str] | None:
@@ -45,14 +56,26 @@ def main() -> None:
 @click.option("--select", callback=_rule_list, help="Only run these rules (comma separated).")
 @click.option("--ignore", callback=_rule_list, help="Skip these rules (comma separated).")
 @click.option("--strict", is_flag=True, help="Exit non-zero on warnings too.")
+@click.option("--config", "config_file", type=_existing_file, help="Settings file (default: nearest pyproject.toml).")
 @_format_option
 def check(
-    files: tuple[Path, ...], select: list[str] | None, ignore: list[str] | None, strict: bool, fmt: str
+    files: tuple[Path, ...],
+    select: list[str] | None,
+    ignore: list[str] | None,
+    strict: bool,
+    config_file: Path | None,
+    fmt: str | None,
 ) -> None:
-    """Lint JSONL datasets. Exits 1 if any errors are found."""
-    reader = read_auto if fmt == "auto" else READERS[fmt]
+    """Lint JSONL datasets. Exits 1 if any errors are found.
+
+    Settings come from [tool.convlint] in the nearest pyproject.toml (or a convlint.toml);
+    --select replaces the configured selection, --ignore adds to it.
+    """
+    settings = _settings(config_file)
+    select = select if select is not None else settings.select
+    ignore = [*settings.ignore, *(ignore or ())]
     severities: Counter[str] = Counter()
-    for f in check_files(files, reader, select, ignore or ()):
+    for f in check_files(files, _reader(fmt, settings), select, ignore, settings.options):
         severities[f.problem.severity] += 1
         turn = f" [turn {f.problem.turn}]" if f.problem.turn is not None else ""
         click.echo(f"{f.path}:{f.line}: {f.problem.severity} {f.problem.rule}{turn} {f.problem.message}")
@@ -67,13 +90,13 @@ def check(
 @click.option("--to", "target", type=click.Choice(sorted(WRITERS)), required=True, help="Output format.")
 @click.option("-o", "--output", type=click.File("w", encoding="utf-8"), default="-", help="Output file (default stdout).")
 @_format_option
-def convert(source: Path, target: str, output, fmt: str) -> None:
+def convert(source: Path, target: str, output, fmt: str | None) -> None:
     """Convert a JSONL dataset between OpenAI, Anthropic and ShareGPT formats.
 
     Lines that can't be read or converted are reported on stderr and left out; the exit code
     is 1 if there were any.
     """
-    reader = read_auto if fmt == "auto" else READERS[fmt]
+    reader = _reader(fmt, _settings(None))
     writer = WRITERS[target]
     written = failed = 0
     for line in read_jsonl(source):
@@ -96,13 +119,13 @@ def convert(source: Path, target: str, output, fmt: str) -> None:
 @click.option("--threshold", type=click.FloatRange(0.5, 1.0), default=0.85, show_default=True, help="Near-duplicate similarity.")
 @click.option("--exact-only", is_flag=True, help="Only drop exact duplicates.")
 @_format_option
-def dedupe(source: Path, output, threshold: float, exact_only: bool, fmt: str) -> None:
+def dedupe(source: Path, output, threshold: float, exact_only: bool, fmt: str | None) -> None:
     """Write SOURCE without duplicate and near-duplicate conversations, keeping the first of each.
 
     Kept lines are copied verbatim. Lines that can't be parsed are kept too (fixing them is
     `check`'s job) and counted on stderr.
     """
-    reader = read_auto if fmt == "auto" else READERS[fmt]
+    reader = _reader(fmt, _settings(None))
     options = Options(near_duplicate_threshold=threshold)
     checks = [ExactDuplicates(options)] + ([] if exact_only else [NearDuplicates(options)])
     kept = dropped = unreadable = 0

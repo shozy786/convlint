@@ -107,3 +107,12 @@ def test_dedupe(tmp_path):
 
     invoke("dedupe", source, "-o", out, "--exact-only")
     assert out.read_text().splitlines() == [lines[0], lines[1], lines[2], lines[4]]
+
+
+def test_check_uses_config(tmp_path):
+    path = tmp_path / "warn.jsonl"
+    path.write_text((FIXTURES / "openai.jsonl").read_text().splitlines()[4] + "\n")
+    cfg = tmp_path / "convlint.toml"
+    cfg.write_text('ignore = ["consecutive-turns"]\n')
+    assert invoke("check", path, "--strict").exit_code == 1
+    assert invoke("check", path, "--strict", "--config", cfg).exit_code == 0
