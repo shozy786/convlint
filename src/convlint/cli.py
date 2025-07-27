@@ -8,10 +8,10 @@ import click
 
 from . import __version__
 from .check import check_files
-from .dataset import DATASET_RULES
+from .dataset import DATASET_RULES, ExactDuplicates, NearDuplicates
 from .formats import READERS, WRITERS, FormatError, read_auto
 from .io import read_jsonl
-from .rules import RULES
+from .rules import RULES, Options
 
 _existing_file = click.Path(exists=True, dir_okay=False, path_type=Path)
 _format_option = click.option(
@@ -88,6 +88,40 @@ def convert(source: Path, target: str, output, fmt: str) -> None:
     click.echo(f"converted {written} conversations to {target}" + (f", skipped {failed}" if failed else ""), err=True)
     if failed:
         raise SystemExit(1)
+
+
+@main.command()
+@click.argument("source", type=_existing_file)
+@click.option("-o", "--output", type=click.File("w", encoding="utf-8"), required=True, help="Where to write kept lines.")
+@click.option("--threshold", type=click.FloatRange(0.5, 1.0), default=0.85, show_default=True, help="Near-duplicate similarity.")
+@click.option("--exact-only", is_flag=True, help="Only drop exact duplicates.")
+@_format_option
+def dedupe(source: Path, output, threshold: float, exact_only: bool, fmt: str) -> None:
+    """Write SOURCE without duplicate and near-duplicate conversations, keeping the first of each.
+
+    Kept lines are copied verbatim. Lines that can't be parsed are kept too (fixing them is
+    `check`'s job) and counted on stderr.
+    """
+    reader = read_auto if fmt == "auto" else READERS[fmt]
+    options = Options(near_duplicate_threshold=threshold)
+    checks = [ExactDuplicates(options)] + ([] if exact_only else [NearDuplicates(options)])
+    kept = dropped = unreadable = 0
+    for line in read_jsonl(source):
+        try:
+            if line.record is None:
+                raise FormatError(line.error or "")
+            conversation = reader(line.record)
+        except FormatError:
+            unreadable += 1
+        else:
+            problems = [p for check in checks for p in check.observe((str(source), line.number), conversation)]
+            if problems:
+                dropped += 1
+                continue
+        output.write(line.text if line.text.endswith("\n") else line.text + "\n")
+        kept += 1
+    note = f", {unreadable} unreadable lines kept as-is" if unreadable else ""
+    click.echo(f"kept {kept}, dropped {dropped} duplicates{note}", err=True)
 
 
 @main.command("rules")

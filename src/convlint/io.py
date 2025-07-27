@@ -14,6 +14,7 @@ class Line:
     number: int
     record: dict[str, Any] | None
     error: str | None = None
+    text: str = ""  # the raw line, so filters can write it back byte for byte
 
 
 def read_jsonl(path: str | Path) -> Iterator[Line]:
@@ -29,9 +30,9 @@ def read_jsonl(path: str | Path) -> Iterator[Line]:
             try:
                 record = json.loads(text)
             except json.JSONDecodeError as e:
-                yield Line(number, None, f"invalid JSON: {e.msg} (column {e.colno})")
+                yield Line(number, None, f"invalid JSON: {e.msg} (column {e.colno})", text)
                 continue
             if not isinstance(record, dict):
-                yield Line(number, None, f"expected a JSON object, got {type(record).__name__}")
+                yield Line(number, None, f"expected a JSON object, got {type(record).__name__}", text)
                 continue
-            yield Line(number, record)
+            yield Line(number, record, None, text)

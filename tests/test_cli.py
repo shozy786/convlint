@@ -82,3 +82,28 @@ def test_convert(tmp_path):
     assert record["system"] == "You are a helpful assistant."
     assert [m["role"] for m in record["messages"]] == ["user", "assistant", "user", "assistant"]
     assert invoke("check", out).exit_code == 0
+
+
+def test_dedupe(tmp_path):
+    import json
+
+    from .test_dataset import TEMPLATE, chat
+
+    source = tmp_path / "in.jsonl"
+    lines = [
+        json.dumps(chat("Lahore hours?", TEMPLATE.format(city="Lahore"))),
+        json.dumps(chat("Multan hours?", TEMPLATE.format(city="Multan"))),
+        "{broken",
+        json.dumps(chat("Lahore hours?", TEMPLATE.format(city="Lahore")), indent=None, separators=(",", ":")),
+        json.dumps(chat("Reset password?", "Open settings and press reset.")),
+    ]
+    source.write_text("\n".join(lines) + "\n")
+
+    out = tmp_path / "out.jsonl"
+    result = invoke("dedupe", source, "-o", out)
+    assert result.exit_code == 0
+    assert "kept 3, dropped 2 duplicates, 1 unreadable lines kept as-is" in result.stderr
+    assert out.read_text().splitlines() == [lines[0], lines[2], lines[4]]
+
+    invoke("dedupe", source, "-o", out, "--exact-only")
+    assert out.read_text().splitlines() == [lines[0], lines[1], lines[2], lines[4]]
