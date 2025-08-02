@@ -7,7 +7,7 @@ from pathlib import Path
 import click
 
 from . import __version__
-from . import config
+from . import config, report
 from .check import check_files
 from .dataset import DATASET_RULES, ExactDuplicates, NearDuplicates
 from .formats import READERS, WRITERS, FormatError, read_auto
@@ -57,6 +57,13 @@ def main() -> None:
 @click.option("--ignore", callback=_rule_list, help="Skip these rules (comma separated).")
 @click.option("--strict", is_flag=True, help="Exit non-zero on warnings too.")
 @click.option("--config", "config_file", type=_existing_file, help="Settings file (default: nearest pyproject.toml).")
+@click.option(
+    "--output-format",
+    type=click.Choice(["text", "json", "github"]),
+    default="text",
+    show_default=True,
+    help="github emits workflow commands that annotate the PR.",
+)
 @_format_option
 def check(
     files: tuple[Path, ...],
@@ -64,6 +71,7 @@ def check(
     ignore: list[str] | None,
     strict: bool,
     config_file: Path | None,
+    output_format: str,
     fmt: str | None,
 ) -> None:
     """Lint JSONL datasets. Exits 1 if any errors are found.
@@ -75,10 +83,17 @@ def check(
     select = select if select is not None else settings.select
     ignore = [*settings.ignore, *(ignore or ())]
     severities: Counter[str] = Counter()
-    for f in check_files(files, _reader(fmt, settings), select, ignore, settings.options):
-        severities[f.problem.severity] += 1
-        turn = f" [turn {f.problem.turn}]" if f.problem.turn is not None else ""
-        click.echo(f"{f.path}:{f.line}: {f.problem.severity} {f.problem.rule}{turn} {f.problem.message}")
+
+    def counted():
+        for f in check_files(files, _reader(fmt, settings), select, ignore, settings.options):
+            severities[f.problem.severity] += 1
+            yield f
+
+    if output_format == "json":
+        click.echo(report.as_json(counted()))
+    else:
+        for line in (report.github if output_format == "github" else report.text)(counted()):
+            click.echo(line)
     errors, warnings = severities["error"], severities["warning"]
     click.echo(f"{errors} error{'s' * (errors != 1)}, {warnings} warning{'s' * (warnings != 1)}", err=True)
     if errors or (strict and warnings):

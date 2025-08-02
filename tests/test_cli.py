@@ -116,3 +116,23 @@ def test_check_uses_config(tmp_path):
     cfg.write_text('ignore = ["consecutive-turns"]\n')
     assert invoke("check", path, "--strict").exit_code == 1
     assert invoke("check", path, "--strict", "--config", cfg).exit_code == 0
+
+
+def test_json_output():
+    import json
+
+    result = invoke("check", FIXTURES / "openai.jsonl", "--output-format", "json")
+    findings = json.loads(result.stdout)
+    assert {"path", "line", "rule", "severity", "turn", "message"} == set(findings[0])
+    assert {(f["line"], f["rule"]) for f in findings} >= {(2, "tool-call-pairing"), (3, "invalid-json")}
+
+
+def test_github_annotations():
+    result = invoke("check", FIXTURES / "openai.jsonl", "--output-format", "github")
+    path = str(FIXTURES / "openai.jsonl").replace(":", "%3A")
+    assert (
+        f"::error file={path},line=2,title=tool-call-pairing::turn 1%3A tool call 'call_2' never gets a result"
+        not in result.stdout
+    )  # messages keep their colons; only properties are escaped
+    assert f"::error file={path},line=2,title=tool-call-pairing::turn 1: tool call 'call_2' never gets a result" in result.stdout
+    assert f"::warning file={path},line=5,title=consecutive-turns::" in result.stdout
