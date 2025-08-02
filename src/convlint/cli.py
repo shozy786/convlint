@@ -162,6 +162,17 @@ def dedupe(source: Path, output, threshold: float, exact_only: bool, fmt: str | 
     click.echo(f"kept {kept}, dropped {dropped} duplicates{note}", err=True)
 
 
+@main.command()
+@click.argument("files", nargs=-1, required=True, type=_existing_file)
+def stats(files: tuple[Path, ...]) -> None:
+    """Summarise conversation lengths, tool usage and token counts."""
+    from .stats import collect, render
+
+    settings = _settings(None)
+    for line in render(collect(files, settings.options.encoding)):
+        click.echo(line)
+
+
 @main.command("rules")
 def list_rules() -> None:
     """List every rule with its default severity."""
