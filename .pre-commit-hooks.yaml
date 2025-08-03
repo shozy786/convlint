@@ -1,0 +1,7 @@
+- id: convlint
+  name: convlint
+  description: Lint fine-tuning conversation datasets
+  entry: convlint check
+  language: python
+  files: \.jsonl$
+  require_serial: true  # duplicate detection needs every file in one process
