@@ -6,8 +6,7 @@ from pathlib import Path
 
 import click
 
-from . import __version__
-from . import config, report
+from . import __version__, config, report
 from .check import check_files
 from .dataset import DATASET_RULES, ExactDuplicates, NearDuplicates
 from .formats import READERS, WRITERS, FormatError, read_auto
@@ -103,7 +102,9 @@ def check(
 @main.command()
 @click.argument("source", type=_existing_file)
 @click.option("--to", "target", type=click.Choice(sorted(WRITERS)), required=True, help="Output format.")
-@click.option("-o", "--output", type=click.File("w", encoding="utf-8"), default="-", help="Output file (default stdout).")
+@click.option(
+    "-o", "--output", type=click.File("w", encoding="utf-8"), default="-", help="Output file (default stdout)."
+)
 @_format_option
 def convert(source: Path, target: str, output, fmt: str | None) -> None:
     """Convert a JSONL dataset between OpenAI, Anthropic and ShareGPT formats.
@@ -130,8 +131,12 @@ def convert(source: Path, target: str, output, fmt: str | None) -> None:
 
 @main.command()
 @click.argument("source", type=_existing_file)
-@click.option("-o", "--output", type=click.File("w", encoding="utf-8"), required=True, help="Where to write kept lines.")
-@click.option("--threshold", type=click.FloatRange(0.5, 1.0), default=0.85, show_default=True, help="Near-duplicate similarity.")
+@click.option(
+    "-o", "--output", type=click.File("w", encoding="utf-8"), required=True, help="Where to write kept lines."
+)
+@click.option(
+    "--threshold", type=click.FloatRange(0.5, 1.0), default=0.85, show_default=True, help="Near-duplicate similarity."
+)
 @click.option("--exact-only", is_flag=True, help="Only drop exact duplicates.")
 @_format_option
 def dedupe(source: Path, output, threshold: float, exact_only: bool, fmt: str | None) -> None:

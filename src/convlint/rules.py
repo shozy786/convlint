@@ -195,7 +195,10 @@ def _unknown_tool(conv: Conversation, opts: Options) -> Iterator[tuple[str, int 
     for i, m in enumerate(conv.messages):
         for call in m.tool_calls:
             if not declared:
-                yield f"calls {call.name!r} but no tools are declared; the model learns to call tools it was never shown", i
+                yield (
+                    f"calls {call.name!r} but no tools are declared; the model learns to call tools it was never shown",
+                    i,
+                )
             elif call.name not in declared:
                 yield f"calls {call.name!r}, which is not among the declared tools {sorted(declared)}", i
 

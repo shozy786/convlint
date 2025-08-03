@@ -134,5 +134,8 @@ def test_github_annotations():
         f"::error file={path},line=2,title=tool-call-pairing::turn 1%3A tool call 'call_2' never gets a result"
         not in result.stdout
     )  # messages keep their colons; only properties are escaped
-    assert f"::error file={path},line=2,title=tool-call-pairing::turn 1: tool call 'call_2' never gets a result" in result.stdout
+    assert (
+        f"::error file={path},line=2,title=tool-call-pairing::turn 1: tool call 'call_2' never gets a result"
+        in result.stdout
+    )
     assert f"::warning file={path},line=5,title=consecutive-turns::" in result.stdout

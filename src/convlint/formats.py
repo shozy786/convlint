@@ -73,7 +73,9 @@ def read_anthropic(record: dict[str, Any]) -> Conversation:
             elif kind == "tool_use":
                 if "name" not in block:
                     raise FormatError(f"messages[{i}].content[{k}]: tool_use without a name")
-                calls.append(ToolCall(block["name"], json.dumps(block.get("input", {}), ensure_ascii=False), block.get("id")))
+                calls.append(
+                    ToolCall(block["name"], json.dumps(block.get("input", {}), ensure_ascii=False), block.get("id"))
+                )
             elif kind == "tool_result":
                 # content is a string or, as often, a list of text/image blocks
                 messages.append(Message("tool", _text(block.get("content")), tool_call_id=block.get("tool_use_id")))
@@ -234,7 +236,10 @@ def write_openai(conversation: Conversation) -> dict[str, Any]:
     record: dict[str, Any] = {"messages": messages}
     if conv.tools:
         record["tools"] = [
-            {"type": "function", "function": _drop_none(name=t.name, description=t.description, parameters=t.parameters)}
+            {
+                "type": "function",
+                "function": _drop_none(name=t.name, description=t.description, parameters=t.parameters),
+            }
             for t in conv.tools
         ]
     return {**conv.meta, **record}
@@ -252,7 +257,9 @@ def write_anthropic(conversation: Conversation) -> dict[str, Any]:
             continue
         if m.role == "assistant":
             blocks: list[dict[str, Any]] = [{"type": "text", "text": m.content}] if m.content else []
-            blocks += [{"type": "tool_use", "id": c.id, "name": c.name, "input": _parse_arguments(c)} for c in m.tool_calls]
+            blocks += [
+                {"type": "tool_use", "id": c.id, "name": c.name, "input": _parse_arguments(c)} for c in m.tool_calls
+            ]
             messages.append({"role": "assistant", "content": blocks})
             continue
         block = (
@@ -293,7 +300,9 @@ def write_sharegpt(conversation: Conversation) -> dict[str, Any]:
             turns.append({"from": "function_call", "value": json.dumps(payload, ensure_ascii=False)})
     record["conversations"] = turns
     if conversation.tools:
-        record["tools"] = [_drop_none(name=t.name, description=t.description, parameters=t.parameters) for t in conversation.tools]
+        record["tools"] = [
+            _drop_none(name=t.name, description=t.description, parameters=t.parameters) for t in conversation.tools
+        ]
     return {**conversation.meta, **record}
 
 

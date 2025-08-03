@@ -14,10 +14,17 @@ dependencies = ["jsonschema>=4.18", "click>=8.1", "numpy>=1.26", "tomli>=2.0; py
 
 [project.optional-dependencies]
 tokens = ["tiktoken>=0.7"]
-dev = ["pytest>=8", "tiktoken>=0.7"]
+dev = ["pytest>=8", "tiktoken>=0.7", "ruff>=0.12"]
 
 [project.scripts]
 convlint = "convlint.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

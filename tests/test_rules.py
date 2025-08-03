@@ -25,7 +25,9 @@ def test_unknown_role_and_misplaced_system():
 
 
 def test_empty_messages():
-    c = conv(("user", "  "), ("assistant", None, [ToolCall("f", "{}", "1")]), ("tool", "ok", [], "1"), ("assistant", ""))
+    c = conv(
+        ("user", "  "), ("assistant", None, [ToolCall("f", "{}", "1")]), ("tool", "ok", [], "1"), ("assistant", "")
+    )
     assert {r for r in found(c) if r[0] == "empty-message"} == {("empty-message", 0), ("empty-message", 3)}
 
 
@@ -45,7 +47,9 @@ def test_no_assistant_turn():
 
 
 def test_first_turn():
-    assert ("first-turn-not-user", 1) in found(conv(("system", "x"), ("assistant", "Hi"), ("user", "Hey"), ("assistant", "?")))
+    assert ("first-turn-not-user", 1) in found(
+        conv(("system", "x"), ("assistant", "Hi"), ("user", "Hey"), ("assistant", "?"))
+    )
 
 
 def test_select_and_ignore():
@@ -76,7 +80,9 @@ def pairing(c):
 
 
 def test_answered_calls_are_fine():
-    c = conv(("user", "?"), assistant_calls(call(id="a"), call(id="b")), result("b"), result("a"), ("assistant", "Done"))
+    c = conv(
+        ("user", "?"), assistant_calls(call(id="a"), call(id="b")), result("b"), result("a"), ("assistant", "Done")
+    )
     assert pairing(c) == []
 
 
@@ -98,14 +104,23 @@ def test_result_with_no_call():
 
 
 def test_calls_without_ids_are_answered_in_order():
-    c = conv(("user", "?"), assistant_calls(call(id=None), call(id=None)), result(None), result(None), ("assistant", "ok"))
+    c = conv(
+        ("user", "?"), assistant_calls(call(id=None), call(id=None)), result(None), result(None), ("assistant", "ok")
+    )
     assert pairing(c) == []
     c = conv(("user", "?"), assistant_calls(call(id=None), call(id=None)), result(None), ("assistant", "ok"))
     assert pairing(c) == [1]
 
 
 def test_duplicate_ids():
-    c = conv(("user", "?"), assistant_calls(call(id="a")), result("a"), assistant_calls(call(id="a")), result("a"), ("assistant", "ok"))
+    c = conv(
+        ("user", "?"),
+        assistant_calls(call(id="a")),
+        result("a"),
+        assistant_calls(call(id="a")),
+        result("a"),
+        ("assistant", "ok"),
+    )
     assert ("duplicate-tool-call-id", 3) in found(c)
 
 
@@ -140,13 +155,15 @@ def test_valid_call():
 
 def test_invalid_json_arguments():
     assert messages(with_call('{"city": "Lahore"'), "invalid-tool-arguments") == [
-        "get_weather: arguments are not valid JSON: '{\"city\": \"Lahore\"'"
+        'get_weather: arguments are not valid JSON: \'{"city": "Lahore"\''
     ]
     assert "got list" in messages(with_call("[1, 2]"), "invalid-tool-arguments")[0]
 
 
 def test_unknown_tool():
-    assert "not among the declared tools ['get_weather']" in messages(with_call("{}", name="get_time"), "unknown-tool")[0]
+    assert (
+        "not among the declared tools ['get_weather']" in messages(with_call("{}", name="get_time"), "unknown-tool")[0]
+    )
     assert "no tools are declared" in messages(with_call("{}", tools=()), "unknown-tool")[0]
 
 
@@ -220,7 +237,9 @@ def test_code_braces_are_not_placeholders():
 
 
 def test_boilerplate_only_in_assistant_turns():
-    c = conv(("user", "As an AI language model, what do you think?"), ("assistant", "As an AI language model, I can't."))
+    c = conv(
+        ("user", "As an AI language model, what do you think?"), ("assistant", "As an AI language model, I can't.")
+    )
     assert [p.turn for p in lint(c, select=["assistant-boilerplate"])] == [1]
 
 

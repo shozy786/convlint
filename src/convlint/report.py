@@ -18,7 +18,8 @@ def github(findings: Iterable[Finding]) -> Iterator[str]:
     """GitHub Actions workflow commands; they show up as annotations on the PR diff."""
     for f in findings:
         message = f.problem.message if f.problem.turn is None else f"turn {f.problem.turn}: {f.problem.message}"
-        yield f"::{f.problem.severity} file={_escape(f.path, True)},line={f.line},title={f.problem.rule}::{_escape(message)}"
+        where = f"file={_escape(f.path, True)},line={f.line},title={f.problem.rule}"
+        yield f"::{f.problem.severity} {where}::{_escape(message)}"
 
 
 def as_json(findings: Iterable[Finding]) -> str:

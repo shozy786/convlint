@@ -32,7 +32,11 @@ OPENAI = {
             "role": "assistant",
             "content": None,
             "tool_calls": [
-                {"id": "call_1", "type": "function", "function": {"name": "get_weather", "arguments": '{"city": "Lahore"}'}}
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "get_weather", "arguments": '{"city": "Lahore"}'},
+                }
             ],
         },
         {"role": "tool", "tool_call_id": "call_1", "content": '{"temp_c": 31}'},
