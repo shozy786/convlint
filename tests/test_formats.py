@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from convlint.formats import (
@@ -235,3 +237,13 @@ def test_unconvertible_arguments():
     )
     with pytest.raises(FormatError, match="arguments are not valid JSON"):
         write_anthropic(conv)
+
+
+def test_sharegpt_tools_as_json_string():
+    record = {**SHAREGPT, "tools": json.dumps(SHAREGPT["tools"])}
+    assert read_sharegpt(record).tool("get_weather") is not None
+    assert read_sharegpt({**SHAREGPT, "tools": ""}).tools == []
+    with pytest.raises(FormatError, match="'tools' is a string but not valid JSON"):
+        read_sharegpt({**SHAREGPT, "tools": "[{"})
+    with pytest.raises(FormatError, match="'tools' must be a list"):
+        read_sharegpt({**SHAREGPT, "tools": {"name": "x"}})

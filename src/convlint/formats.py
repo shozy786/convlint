@@ -136,7 +136,16 @@ def read_sharegpt(record: dict[str, Any]) -> Conversation:
         else:
             messages.append(Message("assistant", None, calls))
 
-    tools = [Tool(t["name"], t.get("description"), t.get("parameters")) for t in record.get("tools") or []]
+    declared = record.get("tools") or []
+    if isinstance(declared, str):
+        # LLaMA-Factory keeps the tools column as a JSON string
+        try:
+            declared = json.loads(declared) if declared.strip() else []
+        except json.JSONDecodeError:
+            raise FormatError("'tools' is a string but not valid JSON") from None
+    if not isinstance(declared, list) or not all(isinstance(t, dict) and "name" in t for t in declared):
+        raise FormatError("'tools' must be a list of objects with a 'name'")
+    tools = [Tool(t["name"], t.get("description"), t.get("parameters")) for t in declared]
     meta = {k: v for k, v in record.items() if k not in {"conversations", "system", "tools"}}
     return Conversation(messages, tools, meta)
 
