@@ -1,0 +1,29 @@
+name: convlint
+description: Lint fine-tuning conversation datasets and annotate the pull request
+branding:
+  icon: check-circle
+  color: green
+
+inputs:
+  paths:
+    description: Files or directories to check, space separated
+    default: "."
+  args:
+    description: Extra arguments for `convlint check`, e.g. `--strict --ignore pii`
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    # install the convlint at the action's own ref, so `uses: ...@v0.1.0` pins the linter too
+    - shell: bash
+      run: pip install --quiet "$GITHUB_ACTION_PATH"
+    # inputs go through env, never straight into the script, so a crafted value can't inject shell
+    - shell: bash
+      env:
+        PATHS: ${{ inputs.paths }}
+        ARGS: ${{ inputs.args }}
+      run: convlint check $PATHS $ARGS --output-format github

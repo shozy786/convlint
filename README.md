@@ -108,11 +108,14 @@ format = "auto"
 
 ## In CI
 
-GitHub Actions:
+GitHub Actions, with findings as annotations on the PR diff:
 
 ```yaml
-- run: pip install convlint
-- run: convlint check data/ --output-format github
+- uses: actions/checkout@v4
+- uses: shozy786/convlint@v0.1.0
+  with:
+    paths: data/
+    args: --strict
 ```
 
 pre-commit:
