@@ -139,3 +139,17 @@ def test_github_annotations():
         in result.stdout
     )
     assert f"::warning file={path},line=5,title=consecutive-turns::" in result.stdout
+
+
+def test_directories_are_searched(tmp_path):
+    (tmp_path / "train" / "v2").mkdir(parents=True)
+    source = (FIXTURES / "openai.jsonl").read_text()
+    (tmp_path / "train" / "a.jsonl").write_text(source)
+    (tmp_path / "train" / "v2" / "b.jsonl").write_text(source)
+    (tmp_path / "train" / "notes.txt").write_text("not a dataset")
+    result = invoke("check", tmp_path / "train", "--select", "duplicate")
+    assert f"{tmp_path / 'train' / 'v2' / 'b.jsonl'}:1: warning duplicate" in result.stdout
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert "no .jsonl files found" in invoke("check", empty).stderr

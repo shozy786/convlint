@@ -14,6 +14,19 @@ from .io import read_jsonl
 from .rules import RULES, Options
 
 _existing_file = click.Path(exists=True, dir_okay=False, path_type=Path)
+_existing_path = click.Path(exists=True, path_type=Path)
+
+
+def _datasets(paths: tuple[Path, ...]) -> list[Path]:
+    """Files as given, directories expanded to every *.jsonl below them, in a stable order."""
+    files: list[Path] = []
+    for path in paths:
+        files += sorted(path.rglob("*.jsonl")) if path.is_dir() else [path]
+    if not files:
+        raise click.UsageError("no .jsonl files found")
+    return files
+
+
 _format_option = click.option(
     "--format",
     "fmt",
@@ -51,7 +64,7 @@ def main() -> None:
 
 
 @main.command()
-@click.argument("files", nargs=-1, required=True, type=_existing_file)
+@click.argument("files", nargs=-1, required=True, type=_existing_path)
 @click.option("--select", callback=_rule_list, help="Only run these rules (comma separated).")
 @click.option("--ignore", callback=_rule_list, help="Skip these rules (comma separated).")
 @click.option("--strict", is_flag=True, help="Exit non-zero on warnings too.")
@@ -73,7 +86,7 @@ def check(
     output_format: str,
     fmt: str | None,
 ) -> None:
-    """Lint JSONL datasets. Exits 1 if any errors are found.
+    """Lint JSONL files, or every *.jsonl under a directory. Exits 1 if any errors are found.
 
     Settings come from [tool.convlint] in the nearest pyproject.toml (or a convlint.toml);
     --select replaces the configured selection, --ignore adds to it.
@@ -84,7 +97,7 @@ def check(
     severities: Counter[str] = Counter()
 
     def counted():
-        for f in check_files(files, _reader(fmt, settings), select, ignore, settings.options):
+        for f in check_files(_datasets(files), _reader(fmt, settings), select, ignore, settings.options):
             severities[f.problem.severity] += 1
             yield f
 
@@ -168,13 +181,13 @@ def dedupe(source: Path, output, threshold: float, exact_only: bool, fmt: str | 
 
 
 @main.command()
-@click.argument("files", nargs=-1, required=True, type=_existing_file)
+@click.argument("files", nargs=-1, required=True, type=_existing_path)
 def stats(files: tuple[Path, ...]) -> None:
     """Summarise conversation lengths, tool usage and token counts."""
     from .stats import collect, render
 
     settings = _settings(None)
-    for line in render(collect(files, settings.options.encoding)):
+    for line in render(collect(_datasets(files), settings.options.encoding)):
         click.echo(line)
 
 
