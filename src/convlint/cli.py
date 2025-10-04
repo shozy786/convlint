@@ -76,6 +76,7 @@ def main() -> None:
     show_default=True,
     help="github emits workflow commands that annotate the PR.",
 )
+@click.option("--statistics", is_flag=True, help="Print how often each rule fired instead of every finding.")
 @_format_option
 def check(
     files: tuple[Path, ...],
@@ -84,6 +85,7 @@ def check(
     strict: bool,
     config_file: Path | None,
     output_format: str,
+    statistics: bool,
     fmt: str | None,
 ) -> None:
     """Lint JSONL files, or every *.jsonl under a directory. Exits 1 if any errors are found.
@@ -95,13 +97,20 @@ def check(
     select = select if select is not None else settings.select
     ignore = [*settings.ignore, *(ignore or ())]
     severities: Counter[str] = Counter()
+    by_rule: Counter[tuple[str, str]] = Counter()
 
     def counted():
         for f in check_files(_datasets(files), _reader(fmt, settings), select, ignore, settings.options):
             severities[f.problem.severity] += 1
+            by_rule[f.problem.rule, f.problem.severity] += 1
             yield f
 
-    if output_format == "json":
+    if statistics:
+        for _ in counted():
+            pass
+        for (rule, severity), count in by_rule.most_common():
+            click.echo(f"{count:>8,}  {severity:<7}  {rule}")
+    elif output_format == "json":
         click.echo(report.as_json(counted()))
     else:
         for line in (report.github if output_format == "github" else report.text)(counted()):

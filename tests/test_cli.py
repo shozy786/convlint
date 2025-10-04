@@ -153,3 +153,12 @@ def test_directories_are_searched(tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()
     assert "no .jsonl files found" in invoke("check", empty).stderr
+
+
+def test_statistics():
+    result = invoke("check", Path(__file__).parent.parent / "examples" / "support.jsonl", "--statistics")
+    assert result.exit_code == 1
+    lines = [line.split() for line in result.stdout.splitlines()]
+    assert ["1", "error", "tool-call-pairing"] in lines
+    assert ["1", "warning", "near-duplicate"] in lines
+    assert len(lines) == 7
