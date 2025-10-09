@@ -6,6 +6,7 @@ import json
 import re
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 from jsonschema import exceptions as schema_errors
@@ -208,24 +209,15 @@ def _invalid_schema(conv: Conversation, opts: Options) -> Iterator[tuple[str, in
     for tool in conv.tools:
         if tool.parameters is None:
             continue
-        try:
-            validators.validator_for(tool.parameters).check_schema(tool.parameters)
-        except schema_errors.SchemaError as e:
-            yield f"tool {tool.name!r} has an invalid parameters schema: {e.message}", None
+        _, error = _compiled(tool.parameters)
+        if error is not None:
+            yield f"tool {tool.name!r} has an invalid parameters schema: {error}", None
 
 
 @rule("arguments-schema-mismatch", "error", "Tool call arguments validate against the tool's schema")
 def _schema_mismatch(conv: Conversation, opts: Options) -> Iterator[tuple[str, int | None]]:
-    checkers: dict[str, Any] = {}
-    for tool in conv.tools:
-        if tool.parameters is None:
-            continue
-        cls = validators.validator_for(tool.parameters)
-        try:
-            cls.check_schema(tool.parameters)
-        except schema_errors.SchemaError:
-            continue  # reported by invalid-tool-schema
-        checkers[tool.name] = cls(tool.parameters)
+    # an invalid schema compiles to None; invalid-tool-schema reports it
+    checkers = {t.name: _compiled(t.parameters)[0] for t in conv.tools if t.parameters is not None}
     for i, m in enumerate(conv.messages):
         for call in m.tool_calls:
             checker = checkers.get(call.name)
@@ -235,6 +227,27 @@ def _schema_mismatch(conv: Conversation, opts: Options) -> Iterator[tuple[str, i
             for error in sorted(checker.iter_errors(parsed), key=lambda e: list(e.path)):
                 where = "/".join(str(p) for p in error.path)
                 yield f"{call.name}: {where + ': ' if where else ''}{error.message}", i
+
+
+def _compiled(schema: dict[str, Any]) -> tuple[Any | None, str | None]:
+    """A validator for ``schema``, or why it isn't a valid schema.
+
+    A dataset typically repeats the same few tool schemas on every line, and checking a schema
+    against its metaschema costs far more than validating arguments with it, so compiled
+    validators are cached by the schema's canonical JSON.
+    """
+    return _compile(json.dumps(schema, sort_keys=True))
+
+
+@lru_cache(maxsize=1024)
+def _compile(schema_json: str) -> tuple[Any | None, str | None]:
+    schema = json.loads(schema_json)
+    cls = validators.validator_for(schema)
+    try:
+        cls.check_schema(schema)
+    except schema_errors.SchemaError as e:
+        return None, e.message
+    return cls(schema), None
 
 
 _UNPARSEABLE = object()
