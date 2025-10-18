@@ -112,7 +112,7 @@ GitHub Actions, with findings as annotations on the PR diff:
 
 ```yaml
 - uses: actions/checkout@v4
-- uses: shozy786/convlint@v0.1.0
+- uses: shozy786/convlint@v0.1.1
   with:
     paths: data/
     args: --strict
@@ -122,7 +122,7 @@ pre-commit:
 
 ```yaml
 - repo: https://github.com/shozy786/convlint
-  rev: v0.1.0
+  rev: v0.1.1
   hooks:
     - id: convlint
 ```

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1 (2025-10-18)
+
+- Files starting with a UTF-8 byte order mark (Excel, some Windows exporters) no longer report
+  their first line as invalid JSON
+
 ## 0.1.0 (2025-10-09)
 
 First release.
