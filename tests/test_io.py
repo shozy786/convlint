@@ -10,3 +10,9 @@ def test_read_jsonl_keeps_going_after_bad_lines(tmp_path):
     assert lines[1].record is None and lines[1].error.startswith("invalid JSON: Expecting value (column 15)")
     assert lines[2].error == "expected a JSON object, got list"
     assert lines[3].record["messages"][0]["role"] == "user"
+
+
+def test_byte_order_mark_is_ignored(tmp_path):
+    path = tmp_path / "excel.jsonl"
+    path.write_bytes(b"\xef\xbb\xbf" + b'{"messages": []}\n{"messages": []}\n')
+    assert [line.error for line in read_jsonl(path)] == [None, None]

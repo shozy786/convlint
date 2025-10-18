@@ -23,7 +23,9 @@ def read_jsonl(path: str | Path) -> Iterator[Line]:
     A broken line doesn't stop the read: in a 50k-line export you want all the bad lines in one
     pass, not one per run.
     """
-    with Path(path).open(encoding="utf-8") as fh:
+    # utf-8-sig: exports from Excel and some Windows tools start with a byte order mark, which
+    # json.loads rejects, so the first conversation of the file was always reported as broken
+    with Path(path).open(encoding="utf-8-sig") as fh:
         for number, text in enumerate(fh, 1):
             if not text.strip():
                 continue
